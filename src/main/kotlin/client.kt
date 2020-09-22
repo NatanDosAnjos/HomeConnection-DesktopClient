@@ -1,124 +1,133 @@
 package c
 
-import jdk.nashorn.internal.ir.debug.JSONWriter
-import jdk.nashorn.internal.runtime.JSONFunctions
-import netscape.javascript.JSObject
-import java.net.Socket
-import java.net.InetAddress
-import java.net.URL
-import java.io.InputStreamReader
-import java.io.BufferedReader
+import com.google.gson.Gson
 import java.util.*
 import kotlin.concurrent.thread
 
+var mapOfDevices = mutableMapOf<Int, Device>()
 
-var PORT: Int = 0
-var SERVER_IP_LOCAL = ""
-var SERVER_DNS: String = ""
+fun main() {
+    val server = instantiateServer()
 
-fun main(args: Array<String>) {
+    if (server != null) {
+        mapOfDevices = getDevicesObjects(server)
+        if (server.isConnected) {
+            do {
+                var choice = choiceDeviceInTheMenu()
+                if (choice == 0) {
+                    break
+                }
+                val selectedDevice = mapOfDevices[choice]!!
+                val command = deviceOptions(selectedDevice)
 
-    doIt(args)
+                if(command.isNullOrEmpty()) {
+                    choice = 0
+                } else {
+                    thread {
+                        val serverFeedback = server.sendCommand(command)
+                        println("\n${selectedDevice.name} respond $serverFeedback\n")
+                    }
+                }
+
+
+            } while (choice != 0)
+
+        } else {
+            if (server.connectedWithDns) {
+                println("Erro de conexão com o servidor ${server.dnsName} na porta ${server.port}")
+            } else {
+                println("Erro de conexão com o servidor ${server.localIp} na porta ${server.port}")
+            }
+        }
+
+    } else {
+        println("Arquivo de configuração do servidor está corrompido ou inelegível!")
+    }
+
+
 
 }
 
-fun doIt(args: Array<String>) {
-    val configFile = ConfigFile()
-    val map = configFile.readConfigFile()
+fun choiceDeviceInTheMenu() : Int {
+    while (true) {
+        if (mapOfDevices.isNotEmpty()) {
+            for ((k, v) in mapOfDevices) {
+                println("$k - ${v.name}")
+            }
+            println("0 - Sair do Programa")
 
-    SERVER_DNS = returnStringNonNullable(map, "SERVER_DNS")
-    SERVER_IP_LOCAL = returnStringNonNullable(map, "SERVER_IP_LOCAL")
+            val input = Scanner(System.`in`)
+            val choice = input.nextLine()
+            val numberSelected = parseToInt(choice)
 
-    val portTmp = map["PORT"]
-    PORT = configFile.parseToInt(portTmp)
-
-    val socket: Socket? = if(ipsAreSame()) {
-        connectToHost(SERVER_IP_LOCAL, PORT)
-    } else {
-        connectToHost(SERVER_DNS, PORT)
-    }
-
-    if(socket != null) {
-
-        for(i in 0 .. args.size.minus(1)) {
-            sendCommand(args[i], socket)
-            println("${espIp(args[i])} is ${receiveStatus(socket)}")
-            socket.close()
+            if (numberSelected <= mapOfDevices.size && numberSelected > 0) {
+                return numberSelected
+            }
+            else if(numberSelected == 0) {
+                break
+            } else {
+                println("opção inválida")
+            }
+            println()
         }
     }
+    return 0
 }
 
-fun returnStringNonNullable(map: MutableMap<String, String>,variableName: String): String {
-    val variable = map[variableName]
-    if (variable.isNullOrEmpty()) {
-        return ""
-    }
-    return variable
+fun deviceOptions(device: Device): String? {
+    val scanKeyboard = Scanner(System.`in`)
+    val optionList = listOf(Device.COMMAND_TURN_ON, Device.COMMAND_TURN_OFF, Device.COMMAND_STATUS)
+
+    do {
+        if (device.isOnOffType()) {
+            println("1 - LIGAR")
+            println("2 - DESLIGAR")
+            println("3 - STATUS")
+            println("0 - VOLTAR")
+
+            val selectedOption = parseToInt(scanKeyboard.nextLine())
+            if (selectedOption > 0 && selectedOption <= optionList.size) {
+                return "${device.ip}=${optionList[selectedOption-1]}"
+
+            } else if (selectedOption == 0) {
+                return null
+
+            } else {
+                println("Opção Inválida!")
+                println()
+            }
+        } else if (device.isPulseType()) {
+            return "${device.ip}=${Device.COMMAND_PULSE_THIS}"
+        }
+        println()
+    } while (true)
+
 }
 
-fun espIp(lineText: String): String {
-    val list = lineText.split("=")
-    return list[0]
-}
+fun instantiateServer() : ServerToConnect? {
+    val configFile = ConfigFile()
+    val configInJsonFormat = configFile.readConfigFile()
 
-fun sendCommand(command: String, socket: Socket?) {
-    val outputStreamSocket = socket!!.outputStream
-    outputStreamSocket.write("$command\n".toByteArray())
-    outputStreamSocket.flush()
-}
-
-fun receiveStatus(socket: Socket): String? {
-    val scan = Scanner(socket.inputStream)
-
-    if(scan.hasNextLine()) {
-        return scan.nextLine()
-    }
-
-    return "cant read"
-}
-
-
-/*-------------------------------------Functions-------------------------------------------------- */
-
-//Return my Global IP
-fun myIp(): String? {
-    try{
-        val whatMyIp = URL("https://checkip.amazonaws.com")
-        val input = BufferedReader(InputStreamReader(whatMyIp.openStream()))
-        return input.readLine()
-        
-    } catch (e: Exception){
-        e.printStackTrace()
-    }
-
-    return null
-}
-
-fun hostIp(hostName: String): String?{
-    return try{
-        val inetAddressObject = InetAddress.getByName(hostName)
-        val ip: String? = inetAddressObject.hostAddress
-        ip
-
+    return try {
+        Gson().fromJson(configInJsonFormat, ServerToConnect::class.java)
     } catch (e: Exception) {
         null
     }
 }
 
-//Verify if my Internal IP is same of my Global IP
-fun ipsAreSame(hostIp: String? = hostIp(SERVER_DNS), myIp: String? = myIp()): Boolean {
-    if(hostIp != null || myIp != null) {
-        return myIp == hostIp
-    }
-    return false
-}
+fun getDevicesObjects(server: ServerToConnect) : MutableMap<Int, Device>{
+    val map = mutableMapOf<Int, Device>()
+    val textInput = server.sendCommand("getDevices")
+    val list = separateArguments(textInput) //Separates Json objects with '=' in the input sting
 
-fun connectToHost(host: String, port: Int): Socket? {
-    try {
-        return Socket(host, port)
+    var cont = 1
+    for (deviceJson in list) {
+        val device = Gson().fromJson(deviceJson, Device::class.java)
+        if (device != null) {
+            map[cont] = device
+            cont++
+        }
     }
-    catch(e: Exception) {
-        println("Erro de conexão com o servidor $host na porta $port")
-    }
-    return null
+
+    return map
 }

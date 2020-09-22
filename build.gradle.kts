@@ -8,10 +8,11 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+    jcenter()
 }
 dependencies {
-    testImplementation(kotlin("test-junit"))
+    implementation ("com.google.code.gson:gson:2.8.6")
 }
-tasks.withType<KotlinCompile>() {
+tasks.withType<KotlinCompile> {
     kotlinOptions.jvmTarget = "1.8"
 }

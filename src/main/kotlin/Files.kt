@@ -12,7 +12,7 @@ interface MainFolder {
     // Creates the program's main directory if it doesn't already exist.
     // Cria o diretório principal do programa caso não exista.
     fun dataFolder(path: String = mainPath): File? {
-        val mainDir = File(path, "data")
+        val mainDir = File(path, "clientDesktop")
         if(!(mainDir.exists())) {
             try {
                 mainDir.mkdirs()
@@ -27,51 +27,43 @@ interface MainFolder {
 
 /*-----------------------------------------------------Config-File------------------------------------------------------------------------ */
 class ConfigFile : MainFolder {
-    private val configFileName = "clientConfigFile.txt"
+    private val configFileName = "clientConfigFile.json"
     private val dataDir = dataFolder()
     private val configFile = File(dataDir, configFileName)
+
+    companion object {
+        const val LOCAL_IP_VARIABLE_NAME = "localIp"
+        const val DNS_VARIABLE_NAME = "dnsName"
+        const val PORT_VARIABLE_NAME = "port"
+    }
 
     init {
         // If the configuration file doesn't exist, it'll be created, and then, the default value of PORT will be write on file.
         // Se o arquivo de configuração não existir, ele será criado e, em seguida, o valor padrão da porta será escrito no arquivo.
         if(configFile.createNewFile()) {
+            val content = StringBuilder()
             val writer = PrintStream(configFile)
 
-            writer.println("SERVER_IP_LOCAL:")
-            writer.println("SERVER_DNS:")
-            writer.println("PORT:")
+            content.append("{\n")
+            content.append("\t\"$LOCAL_IP_VARIABLE_NAME\": \"\",\n")
+            content.append("\t\"$DNS_VARIABLE_NAME\": \"\",\n")
+            content.append("\t\"$PORT_VARIABLE_NAME\": \"\"\n")
+            content.append("}")
 
+            writer.println(content.toString())
             writer.flush()
             writer.close()
         }
     }
 
     //Lê o arquivo de configuração e devolve um Mpa Mutável onde o primeiro argumento é a Key e o segundo argumento o Value
-    fun readConfigFile() : MutableMap<String, String> {
+    fun readConfigFile() : String {
         val input = Scanner(configFile)
-        val fileContent = mutableMapOf<String, String>()
+        val fileContent = StringBuilder()
 
-        while(input.hasNext()) {
-            val line = separateArguments(input.nextLine())
-            val argument = line[0]
-            val value = line[1]
-            fileContent[argument] = value
+        while(input.hasNextLine()) {
+            fileContent.append(input.nextLine())
         }
-        return fileContent
-    }
-
-    private fun separateArguments(lineText: String): List<String> = lineText.split(":")
-
-    fun parseToInt(text: String?): Int {
-        return try {
-            if(text.isNullOrEmpty()) {
-                0
-            } else {
-                text.toInt()
-            }
-        }
-        catch(e: Exception) {
-            0
-        }
+        return fileContent.toString()
     }
 }
